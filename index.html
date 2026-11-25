@@ -55,11 +55,16 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #roll{padding:0 max(18px,env(safe-area-inset-right)) 0 max(18px,env(safe-area-inset-left));will-change:transform;white-space:pre-wrap;word-break:break-all;font-weight:600;line-height:1.55;text-shadow:0 1px 3px rgba(0,0,0,.6)}
 #roll.flip{transform-origin:center}
 #roll span.done{color:rgba(255,255,255,.38)}
-.mic{position:absolute;left:max(12px,env(safe-area-inset-left));display:flex;align-items:center;gap:6px;font-size:12px;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.55);color:#cfd3d8;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mic b{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none;animation:blink 1.2s infinite}
+.mic{position:absolute;top:calc(var(--area,42%) + 8px);left:max(12px,env(safe-area-inset-left));display:flex;align-items:center;gap:6px;font-size:12px;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.55);color:#cfd3d8;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.modebar{display:flex;justify-content:center;margin-bottom:10px}
+.modebar button{font-size:13px;padding:7px 14px;border-radius:999px;background:rgba(255,255,255,.16)}
+.modebar button b{color:var(--accent)}
+.mic.voice b{background:#4cd964;animation:none}
+.mic b{width:8px;height:8px;border-radius:50%;background:#666;flex:none}
+.res{position:absolute;top:calc(var(--area,42%) + 42px);right:max(12px,env(safe-area-inset-right));font-size:11px;color:#cfd3d8;background:rgba(0,0,0,.5);padding:3px 8px;border-radius:999px;font-variant-numeric:tabular-nums}
 .readline{position:absolute;left:6px;width:10px;height:0;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:10px solid var(--accent);transform:translateY(-10px);pointer-events:none}
 #count{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:120px;font-weight:700;color:#fff;text-shadow:0 4px 20px rgba(0,0,0,.6);pointer-events:none}
-.hud{position:absolute;right:max(12px,env(safe-area-inset-right));display:flex;align-items:center;gap:6px;font-size:13px;font-variant-numeric:tabular-nums;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.5)}
+.hud{position:absolute;top:calc(var(--area,42%) + 8px);right:max(12px,env(safe-area-inset-right));display:flex;align-items:center;gap:6px;font-size:13px;font-variant-numeric:tabular-nums;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.5)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--rec);animation:blink 1s infinite}
 @keyframes blink{50%{opacity:.2}}
 .panel{position:absolute;left:0;right:0;bottom:0;padding:12px max(14px,env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));
@@ -109,6 +114,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   <div id="prompter"><div class="readline" id="readline"></div><div id="roll"></div></div>
   <div id="count" hidden></div>
   <div class="mic" id="mic" hidden><b></b><span id="heard">正在听…</span></div>
+  <div class="res" id="res" hidden></div>
   <div class="hud" id="hud" hidden><span class="dot"></span><span id="clock">00:00</span></div>
 
   <div class="panel" id="panel">
@@ -120,12 +126,15 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
         <span>底色</span><input type="range" id="shade" min="0" max="90" step="5"><span id="shadeV"></span>
       </div>
       <div class="toggles">
-        <button id="tFollow">跟读模式（按声音滚动）</button>
+        <button id="tSR">识别文字校准位置</button>
+        <button id="tMatch">成片和预览一致</button>
+        <button id="tHQ">4K 画质（较费电）</button>
         <button id="tMirror">文字镜像</button>
         <button id="tCount">3 秒倒计时</button>
         <button id="tAuto">开录即滚动</button>
       </div>
     </div>
+    <div class="modebar"><button id="modeBtn"></button></div>
     <div class="row">
       <button class="ic" id="backBtn">返回</button>
       <button class="ic" id="playBtn">滚动</button>
@@ -198,7 +207,11 @@ $('delBtn').onclick=()=>{
 };
 
 /* ---------- 设置 ---------- */
-const settings = Object.assign({speed:220,size:34,area:42,shade:55,mirror:false,countdown:true,auto:true,follow:false,facing:'user'}, store.get('settings',{}));
+const DEF={speed:220,size:34,area:42,shade:55,mirror:false,countdown:true,auto:true,follow:true,sr:true,match:true,hq:false,facing:'user',v:2};
+let saved=store.get('settings',{});
+if(saved.v!==2) saved={...saved,follow:true,sr:true,match:true,v:2};   // 旧版本设置迁移：默认开跟读、成片同预览
+const settings=Object.assign({},DEF,saved);
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 function applySettings(){
   store.set('settings', settings);
   $('speed').value=settings.speed; $('speedV').textContent=settings.speed+'字/分';
@@ -208,14 +221,16 @@ function applySettings(){
   $('tMirror').classList.toggle('on',settings.mirror);
   $('tCount').classList.toggle('on',settings.countdown);
   $('tAuto').classList.toggle('on',settings.auto);
-  $('tFollow').classList.toggle('on',settings.follow);
-  $('speed').disabled=settings.follow;
-  if(!playing) $('playBtn').textContent=settings.follow?'跟读':'滚动';
+  $('tSR').classList.toggle('on',settings.sr); $('tSR').hidden=!settings.follow||!SR;
+  $('tMatch').classList.toggle('on',settings.match);
+  $('tHQ').classList.toggle('on',settings.hq);
+  $('modeBtn').innerHTML=settings.follow?'<b>跟读模式</b>：你说话才滚 · 点此切换':'<b>匀速模式</b>：按语速一直滚 · 点此切换';
   const p=$('prompter');
   p.style.height=settings.area+'%';
+  $('shoot').style.setProperty('--area', settings.area+'%');
   p.style.setProperty('--shade', settings.shade/100);
   $('roll').style.fontSize=settings.size+'px';
-  $('roll').classList.toggle('flip',settings.mirror);
+  updatePlayLabel();
   layoutRoll();
   updateStat();
 }
@@ -223,10 +238,13 @@ function applySettings(){
 $('tMirror').onclick=()=>{ settings.mirror=!settings.mirror; applySettings() };
 $('tCount').onclick=()=>{ settings.countdown=!settings.countdown; applySettings() };
 $('tAuto').onclick=()=>{ settings.auto=!settings.auto; applySettings() };
-$('tFollow').onclick=()=>{
-  if(!settings.follow && !SR) return toast('这个浏览器不支持语音识别，iPhone 请用 Safari');
-  setPlaying(false); settings.follow=!settings.follow; applySettings();
-  toast(settings.follow?'跟读模式：你念到哪，字就滚到哪':'已切回匀速滚动');
+$('tMatch').onclick=()=>{ settings.match=!settings.match; applySettings(); toast(settings.match?'成片会和预览一样（自拍不反）':'成片保存摄像头原始画面') };
+$('tHQ').onclick=async()=>{ if(recorder) return; settings.hq=!settings.hq; applySettings(); if(camOn) await startCam() };
+$('tSR').onclick=()=>{ settings.sr=!settings.sr; applySettings(); if(listening){ settings.sr?startSR():stopSR() } toast(settings.sr?'会识别你念的字来校准位置':'只按有没有声音来滚动') };
+$('modeBtn').onclick=()=>{
+  settings.follow=!settings.follow; applySettings();
+  if(settings.follow){ ensureListening() } else { stopListen() }
+  toast(settings.follow?'跟读：你开口就滚，停下就停':'匀速：按设定语速一直滚');
 };
 $('setBtn').onclick=()=>{ $('settings').hidden=!$('settings').hidden };
 
@@ -249,34 +267,37 @@ function setPos(v){
   pos=Math.max(0,Math.min(maxPos,v));
   $('roll').style.transform=`translateY(${-pos}px)`+(settings.mirror?' scaleX(-1)':'');
 }
+let srTarget=-1, srAt=0, markT=0;
 function tick(t){
   const dt=Math.min(0.1,(t-last)/1000);
-  if(playing && !settings.follow){
-    setPos(pos + settings.speed/60*pxPerChar*dt);
-    if(pos>=maxPos) setPlaying(false);
-  }else if(playing && settings.follow && !dragging){
-    const tgt=followTarget();
-    if(Math.abs(tgt-pos)>0.5) setPos(pos+(tgt-pos)*Math.min(1,dt*5));
+  if(playing && !dragging){
+    const v=settings.speed/60*pxPerChar;          // 正常语速对应的像素速度
+    if(!settings.follow){
+      setPos(pos+v*dt);
+      if(pos>=maxPos) setPlaying(false);
+    }else{
+      const fresh=t-srAt<2500 && srTarget>=0;
+      if(voiceOn()) setPos(pos+v*dt*(fresh?0.6:1));     // 有声音就往前走
+      if(fresh) setPos(pos+(srTarget-pos)*Math.min(1,dt*4)); // 识别到具体字时往那儿校准
+      if(t-markT>250){ markT=t; syncMarks(fresh) }
+    }
   }
+  drawLevel();
   last=t; requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
-function setPlaying(v){
-  playing=v;
-  $('playBtn').textContent=v?(settings.follow?'停听':'暂停'):(settings.follow?'跟读':'滚动');
-  if(settings.follow){ v?startListen():stopListen() }
-}
-$('playBtn').onclick=()=>setPlaying(!playing);
+function updatePlayLabel(){ $('playBtn').textContent=playing?'暂停':(settings.follow?'跟读':'滚动') }
+function setPlaying(v){ playing=v; updatePlayLabel() }
+$('playBtn').onclick=()=>{ if(settings.follow) ensureListening(); setPlaying(!playing) };
 
-/* ---------- 跟读：把稿子拆成逐字 span，语音识别结果去稿子里找位置 ---------- */
+/* ---------- 稿子拆成逐字 span，便于定位和标灰 ---------- */
 let chars=[], spans=[], cursor=-1, marked=-1, dragging=false;
 const isWord=c=>/[\p{L}\p{N}]/u.test(c);
-// 常见同音/识别差异，统一后再比
 const NORM={'〇':'零','两':'二','幺':'一','地':'的','得':'的','她':'他','它':'他','哪':'那'};
 const norm=c=>{ c=c.toLowerCase(); return NORM[c]||c };
 function renderRoll(text){
   const r=$('roll'), frag=document.createDocumentFragment();
-  chars=[]; spans=[]; cursor=-1; marked=-1;
+  chars=[]; spans=[]; cursor=-1; marked=-1; srTarget=-1;
   let buf='';
   for(const c of text){
     if(isWord(c)){
@@ -288,22 +309,23 @@ function renderRoll(text){
   if(buf) frag.appendChild(document.createTextNode(buf));
   r.textContent=''; r.appendChild(frag);
 }
-function followTarget(){
-  if(cursor<0) return 0;
-  const s=spans[Math.min(cursor+1,spans.length-1)];
-  return Math.max(0,Math.min(maxPos,s.offsetTop-readY));
-}
 function markTo(i){
+  i=Math.min(i,spans.length-1);
   if(i>marked) for(let k=marked+1;k<=i;k++) spans[k].classList.add('done');
   else for(let k=i+1;k<=marked;k++) spans[k].classList.remove('done');
   marked=i;
 }
-function cursorFromPos(){
-  // 手动拖动后：阅读线上那一行的第一个字之前视为已读
-  const y=pos+readY-2; let i=spans.findIndex(s=>s.offsetTop>=y);
-  if(i<0) i=spans.length; cursor=i-1; markTo(cursor);
+function idxAtReadline(){
+  // 阅读线那一行第一个字的序号（二分）
+  const y=pos+readY-2; let lo=0, hi=spans.length;
+  while(lo<hi){ const m=(lo+hi)>>1; if(spans[m].offsetTop<y) lo=m+1; else hi=m }
+  return lo;
 }
-// 在稿子里找识别尾巴最像的位置：比相邻两字组合（bigram）重合度，离当前位置越近越优先
+function syncMarks(fresh){
+  if(fresh) return;                     // 识别结果新鲜时以识别为准
+  cursor=idxAtReadline()-1; markTo(cursor);
+}
+function resetFollow(){ cursor=-1; markTo(-1); srTarget=-1; setPos(0) }
 function locate(heard){
   const h=[...heard].filter(isWord).map(norm);
   if(h.length<3) return -1;
@@ -316,7 +338,6 @@ function locate(heard){
     const st=Math.max(0,j-L-2); const seg=new Set();
     for(let k=st;k<j;k++) seg.add(chars[k]+chars[k+1]);
     let sc=0; bi.forEach(b=>{ if(seg.has(b)) sc++ });
-    // 末字对上加分，保证定位到“刚念完的那个字”
     if(chars[j]===tail[L-1]) sc+=0.6;
     const dist=Math.abs(j-cursor);
     if(sc>bestScore+0.01 || (Math.abs(sc-bestScore)<=0.01 && dist<bestDist)){ best=j; bestScore=sc; bestDist=dist }
@@ -324,52 +345,81 @@ function locate(heard){
   return bestScore>=need ? best : -1;
 }
 function onHeard(text){
-  $('heard').textContent=text.slice(-16)||'正在听…';
+  setMic(text.slice(-14));
   const j=locate(text);
-  if(j<0) return;
-  if(j<cursor-20) return;          // 不轻易往回跳
+  if(j<0 || j<cursor-20) return;
   cursor=j; markTo(j);
-  if(cursor>=chars.length-1) toast('念完了');
+  const s=spans[Math.min(j+1,spans.length-1)];
+  srTarget=Math.max(0,Math.min(maxPos,s.offsetTop-readY)); srAt=performance.now();
 }
 
-/* 语音识别（iPhone Safari / 安卓 Chrome） */
-const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-let rec=null, listening=false, sessionText='';
-function startListen(){
-  if(!SR){ toast('这个浏览器不支持语音识别'); return }
+/* ---------- 跟读：声音检测（一定可用）+ 文字识别（能用就用） ---------- */
+let listening=false, actx=null, analyser=null, micSrc=null, ownMic=null, level=0, floor=0.01, voiceUntil=0, lvBuf=null;
+function setMic(t){ $('heard').textContent=t }
+function voiceOn(){ return performance.now()<voiceUntil }
+// 必须在点按里同步调用：iPhone 只允许用户点击时启动音频和识别
+function ensureListening(){
   if(listening) return;
-  listening=true; $('mic').hidden=false; $('heard').textContent='正在听…';
-  runRec();
+  listening=true; $('mic').hidden=false; setMic('准备麦克风…');
+  try{ actx=actx||new (window.AudioContext||window.webkitAudioContext)(); actx.resume() }catch(e){}
+  if(settings.sr && SR) startSR();
+  hookMic();
 }
-function runRec(){
-  if(!listening) return;
-  rec=new SR(); rec.lang='zh-CN'; rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
-  sessionText='';
-  rec.onresult=e=>{
-    let txt=''; for(let i=0;i<e.results.length;i++) txt+=e.results[i][0].transcript;
-    sessionText=txt; onHeard(txt);
-  };
-  rec.onerror=e=>{
-    if(e.error==='not-allowed'||e.error==='service-not-allowed'){ toast('没有语音识别权限，已切回匀速滚动'); listening=false; settings.follow=false; applySettings(); setPlaying(false); $('mic').hidden=true }
-    else if(e.error==='network') toast('语音识别要联网（安卓 Chrome 需能连 Google）');
-  };
-  rec.onend=()=>{ if(listening) setTimeout(runRec,150) };   // 停顿或超时后自动续上
-  try{ rec.start() }catch(e){}
+async function hookMic(){
+  try{
+    let ms=stream && stream.getAudioTracks().length ? new MediaStream(stream.getAudioTracks()) : null;
+    if(!ms){ ownMic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}); ms=ownMic }
+    if(!listening) return;
+    micSrc?.disconnect();
+    micSrc=actx.createMediaStreamSource(ms);
+    analyser=actx.createAnalyser(); analyser.fftSize=1024; lvBuf=new Float32Array(analyser.fftSize);
+    micSrc.connect(analyser);
+    if(!(settings.sr&&SR)) setMic('声控：开口就滚');
+  }catch(e){ setMic('麦克风用不了：'+(e.name||e.message)) }
+}
+function drawLevel(){
+  if(!analyser||!listening) return;
+  analyser.getFloatTimeDomainData(lvBuf);
+  let sum=0; for(let i=0;i<lvBuf.length;i++) sum+=lvBuf[i]*lvBuf[i];
+  level=Math.sqrt(sum/lvBuf.length);
+  floor = level<floor ? floor*0.9+level*0.1 : floor*0.998+level*0.002;   // 底噪：降得快升得慢
+  if(level>Math.max(floor*2.5,0.012)) voiceUntil=performance.now()+450;
+  $('mic').classList.toggle('voice',voiceOn());
 }
 function stopListen(){
-  listening=false; $('mic').hidden=true;
-  if(rec){ try{ rec.onend=null; rec.stop() }catch(e){} rec=null }
+  listening=false; $('mic').hidden=true; stopSR();
+  try{ micSrc?.disconnect() }catch(e){} micSrc=null; analyser=null;
+  if(ownMic){ ownMic.getTracks().forEach(t=>t.stop()); ownMic=null }
 }
+let rec=null, srFails=0;
+function startSR(){
+  stopSR(); srFails=0; runRec();
+}
+function runRec(){
+  if(!listening||!settings.sr||!SR) return;
+  const r=new SR(); rec=r;
+  r.lang='zh-CN'; r.continuous=true; r.interimResults=true; r.maxAlternatives=1;
+  r.onstart=()=>setMic('正在听，开口就滚');
+  r.onresult=e=>{ srFails=0; let txt=''; for(let i=0;i<e.results.length;i++) txt+=e.results[i][0].transcript; onHeard(txt) };
+  r.onerror=e=>{
+    const why={'not-allowed':'识别权限被拒','service-not-allowed':'需要在系统设置里打开「听写」','network':'识别要联网，连不上服务','audio-capture':'麦克风被录像占用','no-speech':''}[e.error];
+    if(why) setMic('文字识别不可用（'+why+'），改用声控');
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'||e.error==='network'||e.error==='audio-capture') srFails=99;
+  };
+  r.onend=()=>{ if(rec===r && listening && settings.sr && ++srFails<6) setTimeout(()=>{ if(rec===r) runRec() },250) };
+  try{ r.start() }catch(e){ setMic('文字识别没启动，改用声控') }
+}
+function stopSR(){ const r=rec; rec=null; if(r){ try{ r.onend=null; r.abort() }catch(e){} } }
 
 // 点按暂停/继续，拖动手动调位置
 (()=>{
   const p=$('prompter'); let sy=0, sp=0, moved=false, was=false;
-  p.addEventListener('pointerdown',e=>{ sy=e.clientY; sp=pos; moved=false; was=playing; dragging=true; if(!settings.follow) setPlaying(false); p.setPointerCapture(e.pointerId) });
+  p.addEventListener('pointerdown',e=>{ sy=e.clientY; sp=pos; moved=false; was=playing; dragging=true; p.setPointerCapture(e.pointerId) });
   p.addEventListener('pointermove',e=>{ if(!p.hasPointerCapture(e.pointerId)) return; const d=e.clientY-sy; if(Math.abs(d)>6) moved=true; if(moved) setPos(sp-d) });
   p.addEventListener('pointerup',()=>{
     dragging=false;
-    if(settings.follow){ if(moved) cursorFromPos(); else setPlaying(!playing) }
-    else setPlaying(moved ? was : !was);
+    if(moved){ srTarget=-1; cursor=idxAtReadline()-1; markTo(cursor); setPlaying(was) }
+    else { if(settings.follow) ensureListening(); setPlaying(!was) }
   });
 })();
 
@@ -379,26 +429,47 @@ async function startCam(){
   stopCam();
   $('nocam').hidden=true;
   if(!navigator.mediaDevices?.getUserMedia){ return camFail('这个浏览器打不开相机。请用 Safari（iPhone）或 Chrome（安卓）通过 https 链接打开。') }
+  const W=settings.hq?3840:1920, H=settings.hq?2160:1080;
   try{
     stream=await navigator.mediaDevices.getUserMedia({
-      video:{facingMode:settings.facing,width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},
+      video:{facingMode:settings.facing,width:{ideal:W},height:{ideal:H},frameRate:{ideal:30}},
       audio:{echoCancellation:true,noiseSuppression:true}
     });
     const v=$('cam'); v.srcObject=stream; v.classList.toggle('mirror',settings.facing==='user');
     await v.play().catch(()=>{});
     camOn=true; $('recBtn').hidden=false; $('flipBtn').hidden=false;
+    const show=()=>{ if(v.videoWidth){ $('res').hidden=false; $('res').textContent=`${Math.min(v.videoWidth,v.videoHeight)}p · ${v.videoWidth}×${v.videoHeight}` } };
+    v.onresize=show; v.onloadedmetadata=show; show();
+    if(listening) hookMic();
   }catch(e){ camFail('没有拿到相机/麦克风权限：'+(e.name||e.message)+'。到系统设置里允许浏览器使用相机和麦克风后再试。') }
 }
-function camFail(msg){ camOn=false; const n=$('nocam'); n.textContent=msg; n.hidden=false; $('recBtn').hidden=true; $('flipBtn').hidden=true }
-function stopCam(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null } $('cam').srcObject=null; camOn=false }
+function camFail(msg){ camOn=false; const n=$('nocam'); n.textContent=msg; n.hidden=!msg; $('recBtn').hidden=true; $('flipBtn').hidden=true; $('res').hidden=true }
+function stopCam(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null } $('cam').srcObject=null; camOn=false; $('res').hidden=true }
 $('flipBtn').onclick=async()=>{ if(recorder) return toast('录制中不能翻转'); settings.facing=settings.facing==='user'?'environment':'user'; applySettings(); await startCam() };
 
 /* ---------- 录制 ---------- */
-let recorder=null, chunks=[], recStart=0, clockT=0, lastBlob=null, lastExt='mp4';
+let recorder=null, chunks=[], recStart=0, clockT=0, lastBlob=null, lastExt='mp4', recPipe=null;
 function pickMime(){
   const c=['video/mp4;codecs=avc1,mp4a','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
   if(!window.MediaRecorder) return null;
   return c.find(m=>MediaRecorder.isTypeSupported?.(m)) || '';
+}
+// 自拍时把画面左右翻过来再录，让成片和预览一模一样
+function recordStream(){
+  const v=$('cam');
+  if(!(settings.facing==='user' && settings.match)) return {s:stream, stop(){}};
+  const c=document.createElement('canvas');
+  if(!c.captureStream||!v.videoWidth){ toast('这台手机不支持翻转录制，已按原始画面录'); return {s:stream, stop(){}} }
+  c.width=v.videoWidth; c.height=v.videoHeight;
+  const g=c.getContext('2d',{alpha:false}); let on=true;
+  const draw=()=>{
+    if(!on) return;
+    g.setTransform(-1,0,0,1,c.width,0); g.drawImage(v,0,0,c.width,c.height);
+    v.requestVideoFrameCallback ? v.requestVideoFrameCallback(draw) : requestAnimationFrame(draw);
+  };
+  draw();
+  const cs=c.captureStream(30);
+  return {s:new MediaStream([...cs.getVideoTracks(),...stream.getAudioTracks()]), stop(){ on=false; cs.getTracks().forEach(t=>t.stop()) }};
 }
 async function countdown(){
   if(!settings.countdown) return;
@@ -410,16 +481,20 @@ $('recBtn').onclick=async()=>{
   if(recorder){ recorder.stop(); return }
   if(!stream) return;
   const mime=pickMime(); if(mime===null) return toast('这个浏览器不支持录像');
+  if(settings.follow && settings.auto) ensureListening();     // 趁这次点按把麦克风和识别启动
   $('recBtn').disabled=true; $('settings').hidden=true;
-  setPlaying(false); cursor=-1; markTo(-1); setPos(0);
+  setPlaying(false); resetFollow();
   await countdown();
   chunks=[];
-  try{ recorder=new MediaRecorder(stream, mime?{mimeType:mime,videoBitsPerSecond:8e6}:{}) }
-  catch(e){ recorder=new MediaRecorder(stream) }
+  recPipe=recordStream();
+  const bps=settings.hq?30e6:14e6;
+  try{ recorder=new MediaRecorder(recPipe.s, mime?{mimeType:mime,videoBitsPerSecond:bps,audioBitsPerSecond:128000}:{videoBitsPerSecond:bps}) }
+  catch(e){ recorder=new MediaRecorder(recPipe.s) }
   lastExt=(recorder.mimeType||mime).includes('webm')?'webm':'mp4';
   recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data) };
   recorder.onstop=()=>{
     lastBlob=new Blob(chunks,{type:recorder.mimeType||('video/'+lastExt)});
+    recPipe?.stop(); recPipe=null;
     recorder=null; $('recBtn').classList.remove('on'); $('hud').hidden=true; clearInterval(clockT);
     setPlaying(false); $('backBtn').disabled=false; showReview();
   };
@@ -437,7 +512,7 @@ function showReview(){
   const mb=(lastBlob.size/1048576).toFixed(1);
   $('reviewTip').textContent=`${mb} MB · 「存到相册」会弹出系统分享面板，选「存储视频」即可；不行就用「下载文件」。`;
 }
-$('retakeBtn').onclick=()=>{ $('playback').pause(); $('review').hidden=true; cursor=-1; markTo(-1); setPos(0) };
+$('retakeBtn').onclick=()=>{ $('playback').pause(); $('review').hidden=true; resetFollow() };
 $('saveBtn').onclick=async()=>{
   const f=new File([lastBlob],fileName(),{type:lastBlob.type});
   if(navigator.canShare?.({files:[f]})){
@@ -465,7 +540,7 @@ async function enterShoot(withCam){
 }
 $('goBtn').onclick=()=>enterShoot(true);
 $('readBtn').onclick=()=>enterShoot(false);
-$('backBtn').onclick=()=>{ if(recorder) return; setPlaying(false); stopCam(); try{wake?.release()}catch(e){}; $('shoot').hidden=true; $('edit').hidden=false };
+$('backBtn').onclick=()=>{ if(recorder) return; setPlaying(false); stopListen(); stopCam(); try{wake?.release()}catch(e){}; $('shoot').hidden=true; $('edit').hidden=false };
 addEventListener('resize',()=>requestAnimationFrame(layoutRoll));
 
 loadEditor(); applySettings();
