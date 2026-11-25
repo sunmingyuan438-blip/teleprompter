@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="提词器">
+<meta name="theme-color" content="#0b0d10">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>随身提词器</title>
+<style>
+/* 布局：两屏切换——稿件编辑屏 / 拍摄屏（相机全屏 + 顶部提词区，让视线贴近前置镜头） */
+:root{
+  --bg:#0b0d10; --panel:#15181d; --line:#262a31; --fg:#eef0f3; --mute:#8b929c;
+  --accent:#ffcf3f; --rec:#ff3b30;
+  --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans)}
+body{overflow:hidden;overscroll-behavior:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+[hidden]{display:none!important}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column}
+
+/* ---------- 编辑屏 ---------- */
+#edit{padding:env(safe-area-inset-top) max(16px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(16px,env(safe-area-inset-left))}
+.top{display:flex;align-items:center;gap:10px;padding:14px 0 10px}
+.top h1{font-size:20px;margin:0;flex:1;letter-spacing:.02em}
+.chip{font-size:13px;padding:7px 12px;border-radius:999px;background:var(--panel);border:1px solid var(--line)}
+.scripts{display:flex;gap:8px;overflow-x:auto;padding-bottom:10px;scrollbar-width:none}
+.scripts::-webkit-scrollbar{display:none}
+.scripts button{flex:none;max-width:9em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;padding:6px 12px;border-radius:8px;background:var(--panel);border:1px solid var(--line);color:var(--mute)}
+.scripts button.on{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:600}
+#title{width:100%;font:600 17px var(--sans);color:var(--fg);background:transparent;border:0;border-bottom:1px solid var(--line);padding:8px 0;outline:none}
+#text{flex:1;min-height:0;width:100%;resize:none;margin-top:10px;font:17px/1.7 var(--sans);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;outline:none}
+#text:focus,#title:focus{border-color:var(--accent)}
+.meta{display:flex;justify-content:space-between;font-size:13px;color:var(--mute);padding:8px 2px;font-variant-numeric:tabular-nums}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-bottom:14px}
+.btn{padding:15px;border-radius:14px;font-size:16px;font-weight:600;background:var(--panel);border:1px solid var(--line)}
+.btn.primary{background:var(--accent);color:#141414;border-color:var(--accent)}
+.del{color:var(--mute);font-size:13px}
+
+/* ---------- 拍摄屏 ---------- */
+#shoot{background:#000}
+#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#cam.mirror{transform:scaleX(-1)}
+.nocam{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:14px;text-align:center;padding:40px}
+#prompter{position:absolute;left:0;right:0;top:0;overflow:hidden;touch-action:none;
+  background:linear-gradient(rgba(0,0,0,var(--shade,.55)),rgba(0,0,0,var(--shade,.55)) 82%,rgba(0,0,0,0));
+  padding-top:env(safe-area-inset-top)}
+#roll{padding:0 max(18px,env(safe-area-inset-right)) 0 max(18px,env(safe-area-inset-left));will-change:transform;white-space:pre-wrap;word-break:break-all;font-weight:600;line-height:1.55;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+#roll.flip{transform-origin:center}
+#roll span.done{color:rgba(255,255,255,.38)}
+.mic{position:absolute;left:max(12px,env(safe-area-inset-left));display:flex;align-items:center;gap:6px;font-size:12px;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.55);color:#cfd3d8;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mic b{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none;animation:blink 1.2s infinite}
+.readline{position:absolute;left:6px;width:10px;height:0;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:10px solid var(--accent);transform:translateY(-10px);pointer-events:none}
+#count{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:120px;font-weight:700;color:#fff;text-shadow:0 4px 20px rgba(0,0,0,.6);pointer-events:none}
+.hud{position:absolute;right:max(12px,env(safe-area-inset-right));display:flex;align-items:center;gap:6px;font-size:13px;font-variant-numeric:tabular-nums;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.5)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--rec);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.2}}
+.panel{position:absolute;left:0;right:0;bottom:0;padding:12px max(14px,env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));
+  background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.75) 30%)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sliders{display:grid;grid-template-columns:auto 1fr auto;gap:6px 10px;align-items:center;font-size:12px;color:#cfd3d8;margin-bottom:12px;font-variant-numeric:tabular-nums}
+.sliders input{width:100%;accent-color:var(--accent)}
+.toggles{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.toggles button{font-size:12px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.12)}
+.toggles button.on{background:var(--accent);color:#141414;font-weight:600}
+.ic{width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font-size:13px;flex-direction:column;line-height:1.1}
+.rec{width:74px;height:74px;border-radius:50%;border:4px solid #fff;display:flex;align-items:center;justify-content:center}
+.rec i{width:56px;height:56px;border-radius:50%;background:var(--rec);transition:all .2s}
+.rec.on i{width:28px;height:28px;border-radius:6px}
+#more{position:absolute;right:max(12px,env(safe-area-inset-right));bottom:calc(120px + env(safe-area-inset-bottom))}
+
+/* ---------- 回看 ---------- */
+#review{position:fixed;inset:0;background:rgba(0,0,0,.92);display:flex;flex-direction:column;padding:calc(12px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));gap:12px;z-index:5}
+#review video{flex:1;min-height:0;width:100%;background:#000;border-radius:12px;object-fit:contain}
+#review .tip{font-size:12px;color:var(--mute);text-align:center;line-height:1.5}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.toast{position:fixed;left:50%;bottom:calc(30% + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(30,30,30,.95);padding:10px 16px;border-radius:10px;font-size:14px;z-index:9;pointer-events:none}
+</style>
+</head>
+<body>
+
+<!-- 编辑屏 -->
+<section id="edit" class="screen">
+  <div class="top">
+    <h1>提词器</h1>
+    <button class="chip" id="newBtn">＋ 新稿</button>
+  </div>
+  <div class="scripts" id="list"></div>
+  <input id="title" placeholder="稿子标题" maxlength="40">
+  <textarea id="text" placeholder="把口播稿粘贴到这里…"></textarea>
+  <div class="meta"><span id="stat">0 字</span><button class="del" id="delBtn">删除这篇</button></div>
+  <div class="actions">
+    <button class="btn" id="readBtn">只看稿不录</button>
+    <button class="btn primary" id="goBtn">开拍</button>
+  </div>
+</section>
+
+<!-- 拍摄屏 -->
+<section id="shoot" class="screen" hidden>
+  <video id="cam" playsinline autoplay muted></video>
+  <div class="nocam" id="nocam" hidden></div>
+  <div id="prompter"><div class="readline" id="readline"></div><div id="roll"></div></div>
+  <div id="count" hidden></div>
+  <div class="mic" id="mic" hidden><b></b><span id="heard">正在听…</span></div>
+  <div class="hud" id="hud" hidden><span class="dot"></span><span id="clock">00:00</span></div>
+
+  <div class="panel" id="panel">
+    <div id="settings" hidden>
+      <div class="sliders">
+        <span>语速</span><input type="range" id="speed" min="80" max="480" step="10"><span id="speedV"></span>
+        <span>字号</span><input type="range" id="size" min="20" max="64" step="2"><span id="sizeV"></span>
+        <span>提词区</span><input type="range" id="area" min="25" max="70" step="5"><span id="areaV"></span>
+        <span>底色</span><input type="range" id="shade" min="0" max="90" step="5"><span id="shadeV"></span>
+      </div>
+      <div class="toggles">
+        <button id="tFollow">跟读模式（按声音滚动）</button>
+        <button id="tMirror">文字镜像</button>
+        <button id="tCount">3 秒倒计时</button>
+        <button id="tAuto">开录即滚动</button>
+      </div>
+    </div>
+    <div class="row">
+      <button class="ic" id="backBtn">返回</button>
+      <button class="ic" id="playBtn">滚动</button>
+      <button class="rec" id="recBtn" aria-label="录制"><i></i></button>
+      <button class="ic" id="flipBtn">翻转</button>
+      <button class="ic" id="setBtn">设置</button>
+    </div>
+  </div>
+</section>
+
+<!-- 回看 -->
+<section id="review" hidden>
+  <video id="playback" playsinline controls></video>
+  <div class="grid3">
+    <button class="btn" id="retakeBtn">重拍</button>
+    <button class="btn primary" id="saveBtn">存到相册</button>
+    <button class="btn" id="dlBtn">下载文件</button>
+  </div>
+  <div class="tip" id="reviewTip">「存到相册」会弹出系统分享面板，选「存储视频」即可。</div>
+</section>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem('tp:'+k); return v==null ? d : JSON.parse(v) }catch(e){ return d } },
+  set(k, v){ try{ localStorage.setItem('tp:'+k, JSON.stringify(v)) }catch(e){} }
+};
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>t.hidden=true,1800) }
+
+/* ---------- 稿件 ---------- */
+const SAMPLE = {id:'s'+Date.now(), title:'示例：开场白', text:
+`大家好，这是一段示例稿子，你可以直接删掉换成自己的口播稿。
+
+拍摄时，文字会从屏幕上方往上滚，尽量把眼睛停在黄色小箭头那一行，这样看起来就像在看镜头。
+
+语速单位是「字每分钟」，正常口播大概在两百到两百六之间。点一下文字可以暂停，手指上下拖能往回找。
+
+好，开始录吧。`};
+let scripts = store.get('scripts', null) || [SAMPLE];
+let cur = store.get('cur', scripts[0].id);
+if(!scripts.find(s=>s.id===cur)) cur = scripts[0].id;
+const curScript = () => scripts.find(s=>s.id===cur);
+function save(){ store.set('scripts', scripts); store.set('cur', cur) }
+
+function renderList(){
+  const box=$('list'); box.innerHTML='';
+  scripts.forEach(s=>{
+    const b=document.createElement('button');
+    b.textContent=s.title||'未命名'; if(s.id===cur) b.className='on';
+    b.onclick=()=>{ cur=s.id; save(); loadEditor() };
+    box.appendChild(b);
+  });
+}
+function countChars(t){ return t.replace(/\s/g,'').length }
+function updateStat(){
+  const n=countChars($('text').value), cpm=settings.speed;
+  const sec=Math.round(n/cpm*60);
+  $('stat').textContent=`${n} 字 · 按 ${cpm} 字/分 约 ${Math.floor(sec/60)}分${String(sec%60).padStart(2,'0')}秒`;
+}
+function loadEditor(){ const s=curScript(); $('title').value=s.title; $('text').value=s.text; renderList(); updateStat() }
+$('title').oninput=e=>{ curScript().title=e.target.value; save(); renderList() };
+$('text').oninput=e=>{ curScript().text=e.target.value; save(); updateStat() };
+$('newBtn').onclick=()=>{ const s={id:'s'+Date.now(),title:'新稿 '+(scripts.length+1),text:''}; scripts.unshift(s); cur=s.id; save(); loadEditor(); $('text').focus() };
+$('delBtn').onclick=()=>{
+  if($('delBtn').dataset.arm!=='1'){ $('delBtn').dataset.arm='1'; $('delBtn').textContent='再点一次确认删除'; setTimeout(()=>{ $('delBtn').dataset.arm=''; $('delBtn').textContent='删除这篇' },2500); return }
+  scripts=scripts.filter(s=>s.id!==cur); if(!scripts.length) scripts=[{id:'s'+Date.now(),title:'新稿',text:''}];
+  cur=scripts[0].id; save(); loadEditor(); $('delBtn').dataset.arm=''; $('delBtn').textContent='删除这篇';
+};
+
+/* ---------- 设置 ---------- */
+const settings = Object.assign({speed:220,size:34,area:42,shade:55,mirror:false,countdown:true,auto:true,follow:false,facing:'user'}, store.get('settings',{}));
+function applySettings(){
+  store.set('settings', settings);
+  $('speed').value=settings.speed; $('speedV').textContent=settings.speed+'字/分';
+  $('size').value=settings.size; $('sizeV').textContent=settings.size+'px';
+  $('area').value=settings.area; $('areaV').textContent=settings.area+'%';
+  $('shade').value=settings.shade; $('shadeV').textContent=settings.shade+'%';
+  $('tMirror').classList.toggle('on',settings.mirror);
+  $('tCount').classList.toggle('on',settings.countdown);
+  $('tAuto').classList.toggle('on',settings.auto);
+  $('tFollow').classList.toggle('on',settings.follow);
+  $('speed').disabled=settings.follow;
+  if(!playing) $('playBtn').textContent=settings.follow?'跟读':'滚动';
+  const p=$('prompter');
+  p.style.height=settings.area+'%';
+  p.style.setProperty('--shade', settings.shade/100);
+  $('roll').style.fontSize=settings.size+'px';
+  $('roll').classList.toggle('flip',settings.mirror);
+  layoutRoll();
+  updateStat();
+}
+['speed','size','area','shade'].forEach(k=>$(k).oninput=e=>{ settings[k]=+e.target.value; applySettings() });
+$('tMirror').onclick=()=>{ settings.mirror=!settings.mirror; applySettings() };
+$('tCount').onclick=()=>{ settings.countdown=!settings.countdown; applySettings() };
+$('tAuto').onclick=()=>{ settings.auto=!settings.auto; applySettings() };
+$('tFollow').onclick=()=>{
+  if(!settings.follow && !SR) return toast('这个浏览器不支持语音识别，iPhone 请用 Safari');
+  setPlaying(false); settings.follow=!settings.follow; applySettings();
+  toast(settings.follow?'跟读模式：你念到哪，字就滚到哪':'已切回匀速滚动');
+};
+$('setBtn').onclick=()=>{ $('settings').hidden=!$('settings').hidden };
+
+/* ---------- 滚动引擎 ---------- */
+let pos=0, playing=false, last=0, readY=0, maxPos=0, pxPerChar=1;
+function layoutRoll(){
+  const p=$('prompter'), r=$('roll');
+  const h=p.clientHeight; if(!h) return;
+  const safeTop=parseFloat(getComputedStyle(p).paddingTop)||0;
+  readY = safeTop + settings.size*1.2;            // 阅读线：提词区顶部第一行，最贴近前置镜头
+  $('readline').style.top=(readY+settings.size*0.78)+'px';
+  r.style.paddingTop=(readY-safeTop)+'px';
+  r.style.paddingBottom=h+'px';
+  const textH=r.scrollHeight - h - (readY-safeTop);
+  maxPos=Math.max(0,textH);
+  pxPerChar = textH / Math.max(1,countChars(curScript().text));
+  setPos(pos);
+}
+function setPos(v){
+  pos=Math.max(0,Math.min(maxPos,v));
+  $('roll').style.transform=`translateY(${-pos}px)`+(settings.mirror?' scaleX(-1)':'');
+}
+function tick(t){
+  const dt=Math.min(0.1,(t-last)/1000);
+  if(playing && !settings.follow){
+    setPos(pos + settings.speed/60*pxPerChar*dt);
+    if(pos>=maxPos) setPlaying(false);
+  }else if(playing && settings.follow && !dragging){
+    const tgt=followTarget();
+    if(Math.abs(tgt-pos)>0.5) setPos(pos+(tgt-pos)*Math.min(1,dt*5));
+  }
+  last=t; requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+function setPlaying(v){
+  playing=v;
+  $('playBtn').textContent=v?(settings.follow?'停听':'暂停'):(settings.follow?'跟读':'滚动');
+  if(settings.follow){ v?startListen():stopListen() }
+}
+$('playBtn').onclick=()=>setPlaying(!playing);
+
+/* ---------- 跟读：把稿子拆成逐字 span，语音识别结果去稿子里找位置 ---------- */
+let chars=[], spans=[], cursor=-1, marked=-1, dragging=false;
+const isWord=c=>/[\p{L}\p{N}]/u.test(c);
+// 常见同音/识别差异，统一后再比
+const NORM={'〇':'零','两':'二','幺':'一','地':'的','得':'的','她':'他','它':'他','哪':'那'};
+const norm=c=>{ c=c.toLowerCase(); return NORM[c]||c };
+function renderRoll(text){
+  const r=$('roll'), frag=document.createDocumentFragment();
+  chars=[]; spans=[]; cursor=-1; marked=-1;
+  let buf='';
+  for(const c of text){
+    if(isWord(c)){
+      if(buf){ frag.appendChild(document.createTextNode(buf)); buf='' }
+      const s=document.createElement('span'); s.textContent=c; frag.appendChild(s);
+      spans.push(s); chars.push(norm(c));
+    }else buf+=c;
+  }
+  if(buf) frag.appendChild(document.createTextNode(buf));
+  r.textContent=''; r.appendChild(frag);
+}
+function followTarget(){
+  if(cursor<0) return 0;
+  const s=spans[Math.min(cursor+1,spans.length-1)];
+  return Math.max(0,Math.min(maxPos,s.offsetTop-readY));
+}
+function markTo(i){
+  if(i>marked) for(let k=marked+1;k<=i;k++) spans[k].classList.add('done');
+  else for(let k=i+1;k<=marked;k++) spans[k].classList.remove('done');
+  marked=i;
+}
+function cursorFromPos(){
+  // 手动拖动后：阅读线上那一行的第一个字之前视为已读
+  const y=pos+readY-2; let i=spans.findIndex(s=>s.offsetTop>=y);
+  if(i<0) i=spans.length; cursor=i-1; markTo(cursor);
+}
+// 在稿子里找识别尾巴最像的位置：比相邻两字组合（bigram）重合度，离当前位置越近越优先
+function locate(heard){
+  const h=[...heard].filter(isWord).map(norm);
+  if(h.length<3) return -1;
+  const tail=h.slice(-12), L=tail.length;
+  const bi=new Set(); for(let k=0;k<L-1;k++) bi.add(tail[k]+tail[k+1]);
+  const need=Math.max(2,Math.ceil(bi.size*0.5));
+  const from=Math.max(L-1,cursor-20), to=Math.min(chars.length-1,cursor+Math.max(160,L*6));
+  let best=-1, bestScore=0, bestDist=1e9;
+  for(let j=from;j<=to;j++){
+    const st=Math.max(0,j-L-2); const seg=new Set();
+    for(let k=st;k<j;k++) seg.add(chars[k]+chars[k+1]);
+    let sc=0; bi.forEach(b=>{ if(seg.has(b)) sc++ });
+    // 末字对上加分，保证定位到“刚念完的那个字”
+    if(chars[j]===tail[L-1]) sc+=0.6;
+    const dist=Math.abs(j-cursor);
+    if(sc>bestScore+0.01 || (Math.abs(sc-bestScore)<=0.01 && dist<bestDist)){ best=j; bestScore=sc; bestDist=dist }
+  }
+  return bestScore>=need ? best : -1;
+}
+function onHeard(text){
+  $('heard').textContent=text.slice(-16)||'正在听…';
+  const j=locate(text);
+  if(j<0) return;
+  if(j<cursor-20) return;          // 不轻易往回跳
+  cursor=j; markTo(j);
+  if(cursor>=chars.length-1) toast('念完了');
+}
+
+/* 语音识别（iPhone Safari / 安卓 Chrome） */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null, listening=false, sessionText='';
+function startListen(){
+  if(!SR){ toast('这个浏览器不支持语音识别'); return }
+  if(listening) return;
+  listening=true; $('mic').hidden=false; $('heard').textContent='正在听…';
+  runRec();
+}
+function runRec(){
+  if(!listening) return;
+  rec=new SR(); rec.lang='zh-CN'; rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+  sessionText='';
+  rec.onresult=e=>{
+    let txt=''; for(let i=0;i<e.results.length;i++) txt+=e.results[i][0].transcript;
+    sessionText=txt; onHeard(txt);
+  };
+  rec.onerror=e=>{
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'){ toast('没有语音识别权限，已切回匀速滚动'); listening=false; settings.follow=false; applySettings(); setPlaying(false); $('mic').hidden=true }
+    else if(e.error==='network') toast('语音识别要联网（安卓 Chrome 需能连 Google）');
+  };
+  rec.onend=()=>{ if(listening) setTimeout(runRec,150) };   // 停顿或超时后自动续上
+  try{ rec.start() }catch(e){}
+}
+function stopListen(){
+  listening=false; $('mic').hidden=true;
+  if(rec){ try{ rec.onend=null; rec.stop() }catch(e){} rec=null }
+}
+
+// 点按暂停/继续，拖动手动调位置
+(()=>{
+  const p=$('prompter'); let sy=0, sp=0, moved=false, was=false;
+  p.addEventListener('pointerdown',e=>{ sy=e.clientY; sp=pos; moved=false; was=playing; dragging=true; if(!settings.follow) setPlaying(false); p.setPointerCapture(e.pointerId) });
+  p.addEventListener('pointermove',e=>{ if(!p.hasPointerCapture(e.pointerId)) return; const d=e.clientY-sy; if(Math.abs(d)>6) moved=true; if(moved) setPos(sp-d) });
+  p.addEventListener('pointerup',()=>{
+    dragging=false;
+    if(settings.follow){ if(moved) cursorFromPos(); else setPlaying(!playing) }
+    else setPlaying(moved ? was : !was);
+  });
+})();
+
+/* ---------- 相机 ---------- */
+let stream=null, camOn=false;
+async function startCam(){
+  stopCam();
+  $('nocam').hidden=true;
+  if(!navigator.mediaDevices?.getUserMedia){ return camFail('这个浏览器打不开相机。请用 Safari（iPhone）或 Chrome（安卓）通过 https 链接打开。') }
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:settings.facing,width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},
+      audio:{echoCancellation:true,noiseSuppression:true}
+    });
+    const v=$('cam'); v.srcObject=stream; v.classList.toggle('mirror',settings.facing==='user');
+    await v.play().catch(()=>{});
+    camOn=true; $('recBtn').hidden=false; $('flipBtn').hidden=false;
+  }catch(e){ camFail('没有拿到相机/麦克风权限：'+(e.name||e.message)+'。到系统设置里允许浏览器使用相机和麦克风后再试。') }
+}
+function camFail(msg){ camOn=false; const n=$('nocam'); n.textContent=msg; n.hidden=false; $('recBtn').hidden=true; $('flipBtn').hidden=true }
+function stopCam(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null } $('cam').srcObject=null; camOn=false }
+$('flipBtn').onclick=async()=>{ if(recorder) return toast('录制中不能翻转'); settings.facing=settings.facing==='user'?'environment':'user'; applySettings(); await startCam() };
+
+/* ---------- 录制 ---------- */
+let recorder=null, chunks=[], recStart=0, clockT=0, lastBlob=null, lastExt='mp4';
+function pickMime(){
+  const c=['video/mp4;codecs=avc1,mp4a','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  if(!window.MediaRecorder) return null;
+  return c.find(m=>MediaRecorder.isTypeSupported?.(m)) || '';
+}
+async function countdown(){
+  if(!settings.countdown) return;
+  const c=$('count'); c.hidden=false;
+  for(const n of [3,2,1]){ c.textContent=n; await new Promise(r=>setTimeout(r,800)) }
+  c.hidden=true;
+}
+$('recBtn').onclick=async()=>{
+  if(recorder){ recorder.stop(); return }
+  if(!stream) return;
+  const mime=pickMime(); if(mime===null) return toast('这个浏览器不支持录像');
+  $('recBtn').disabled=true; $('settings').hidden=true;
+  setPlaying(false); cursor=-1; markTo(-1); setPos(0);
+  await countdown();
+  chunks=[];
+  try{ recorder=new MediaRecorder(stream, mime?{mimeType:mime,videoBitsPerSecond:8e6}:{}) }
+  catch(e){ recorder=new MediaRecorder(stream) }
+  lastExt=(recorder.mimeType||mime).includes('webm')?'webm':'mp4';
+  recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data) };
+  recorder.onstop=()=>{
+    lastBlob=new Blob(chunks,{type:recorder.mimeType||('video/'+lastExt)});
+    recorder=null; $('recBtn').classList.remove('on'); $('hud').hidden=true; clearInterval(clockT);
+    setPlaying(false); $('backBtn').disabled=false; showReview();
+  };
+  recorder.start(1000);
+  recStart=Date.now(); $('recBtn').classList.add('on'); $('recBtn').disabled=false; $('backBtn').disabled=true;
+  $('hud').hidden=false; $('clock').textContent='00:00';
+  clockT=setInterval(()=>{ const s=Math.floor((Date.now()-recStart)/1000); $('clock').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0') },250);
+  if(settings.auto) setPlaying(true);
+};
+
+function fileName(){ const d=new Date(), p=n=>String(n).padStart(2,'0'); return `提词_${(curScript().title||'视频').slice(0,12)}_${d.getMonth()+1}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.${lastExt}` }
+function showReview(){
+  const v=$('playback'); if(v.src) URL.revokeObjectURL(v.src);
+  v.src=URL.createObjectURL(lastBlob); $('review').hidden=false;
+  const mb=(lastBlob.size/1048576).toFixed(1);
+  $('reviewTip').textContent=`${mb} MB · 「存到相册」会弹出系统分享面板，选「存储视频」即可；不行就用「下载文件」。`;
+}
+$('retakeBtn').onclick=()=>{ $('playback').pause(); $('review').hidden=true; cursor=-1; markTo(-1); setPos(0) };
+$('saveBtn').onclick=async()=>{
+  const f=new File([lastBlob],fileName(),{type:lastBlob.type});
+  if(navigator.canShare?.({files:[f]})){
+    try{ await navigator.share({files:[f]}); toast('已交给系统处理') }catch(e){ if(e.name!=='AbortError') toast('分享失败，试试「下载文件」') }
+  }else toast('这个浏览器不支持直接存相册，请用「下载文件」');
+};
+$('dlBtn').onclick=()=>{
+  const a=document.createElement('a'); a.href=URL.createObjectURL(lastBlob); a.download=fileName();
+  document.body.appendChild(a); a.click(); a.remove();
+};
+
+/* ---------- 屏幕常亮 ---------- */
+let wake=null;
+async function keepAwake(){ try{ wake=await navigator.wakeLock?.request('screen') }catch(e){} }
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && !$('shoot').hidden) keepAwake() });
+
+/* ---------- 切屏 ---------- */
+async function enterShoot(withCam){
+  if(!countChars(curScript().text)) return toast('先写点稿子');
+  renderRoll(curScript().text);
+  $('edit').hidden=true; $('shoot').hidden=false; $('settings').hidden=true;
+  pos=0; setPlaying(false); applySettings(); keepAwake();
+  if(withCam) await startCam(); else { stopCam(); camFail(''); $('nocam').hidden=true }
+  requestAnimationFrame(layoutRoll);
+}
+$('goBtn').onclick=()=>enterShoot(true);
+$('readBtn').onclick=()=>enterShoot(false);
+$('backBtn').onclick=()=>{ if(recorder) return; setPlaying(false); stopCam(); try{wake?.release()}catch(e){}; $('shoot').hidden=true; $('edit').hidden=false };
+addEventListener('resize',()=>requestAnimationFrame(layoutRoll));
+
+loadEditor(); applySettings();
+</script>
+</body>
+</html>
