@@ -1,5 +1,5 @@
 // 联网时总取最新版，断网时用上次缓存
-const C='tp-v3';
+const C='tp-v4';
 self.addEventListener('install',e=>{ e.waitUntil(caches.open(C).then(c=>c.addAll(['./','index.html','manifest.json','icon.svg']))); self.skipWaiting() });
 self.addEventListener('activate',e=>{ e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))).then(()=>self.clients.claim())) });
 self.addEventListener('fetch',e=>{
