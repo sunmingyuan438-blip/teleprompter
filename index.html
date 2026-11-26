@@ -85,6 +85,21 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #review{position:fixed;inset:0;background:rgba(0,0,0,.92);display:flex;flex-direction:column;padding:calc(12px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));gap:12px;z-index:5}
 #review video{flex:1;min-height:0;width:100%;background:#000;border-radius:12px;object-fit:contain}
 #review .tip{font-size:12px;color:var(--mute);text-align:center;line-height:1.5}
+#roll span.em{color:var(--accent)}
+#roll span.em.done{color:rgba(255,207,63,.4)}
+.modebar{gap:8px}
+#review .stats{font-size:14px;text-align:center;font-variant-numeric:tabular-nums;color:var(--fg)}
+#review .stats b{color:var(--accent);font-weight:600}
+#lib{padding:env(safe-area-inset-top) max(16px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(16px,env(safe-area-inset-left))}
+.takes{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-bottom:16px}
+.take{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;padding:12px 14px;border-radius:12px;background:var(--panel);border:1px solid var(--line)}
+.take .t{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.take .m{grid-column:1;font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}
+.take .b{grid-row:1/3;grid-column:2;display:flex;gap:6px}
+.take .b button{font-size:13px;padding:8px 12px;border-radius:8px;background:#22262d}
+.take .b button.warn{color:#ff8a80}
+.empty{color:var(--mute);font-size:14px;line-height:1.7;padding:30px 4px;text-align:center}
+.tools{display:flex;gap:8px;align-items:center}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .toast{position:fixed;left:50%;bottom:calc(30% + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(30,30,30,.95);padding:10px 16px;border-radius:10px;font-size:14px;z-index:9;pointer-events:none}
 </style>
@@ -95,12 +110,15 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 <section id="edit" class="screen">
   <div class="top">
     <h1>提词器</h1>
+    <button class="chip" id="libBtn">片库</button>
+    <button class="chip" id="importBtn">导入</button>
     <button class="chip" id="newBtn">＋ 新稿</button>
+    <input type="file" id="importFile" accept=".txt,.md,text/plain" multiple hidden>
   </div>
   <div class="scripts" id="list"></div>
   <input id="title" placeholder="稿子标题" maxlength="40">
   <textarea id="text" placeholder="把口播稿粘贴到这里…"></textarea>
-  <div class="meta"><span id="stat">0 字</span><button class="del" id="delBtn">删除这篇</button></div>
+  <div class="meta"><span id="stat">0 字</span><span class="tools"><button class="del" id="hintBtn">【】标重点</button><button class="del" id="delBtn">删除这篇</button></span></div>
   <div class="actions">
     <button class="btn" id="readBtn">只看稿不录</button>
     <button class="btn primary" id="goBtn">开拍</button>
@@ -132,9 +150,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
         <button id="tMirror">文字镜像</button>
         <button id="tCount">3 秒倒计时</button>
         <button id="tAuto">开录即滚动</button>
+        <button id="tBreak">一句一行</button>
       </div>
     </div>
-    <div class="modebar"><button id="modeBtn"></button></div>
+    <div class="modebar"><button id="homeBtn">回到开头</button><button id="modeBtn"></button></div>
     <div class="row">
       <button class="ic" id="backBtn">返回</button>
       <button class="ic" id="playBtn">滚动</button>
@@ -145,9 +164,20 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   </div>
 </section>
 
+<!-- 片库 -->
+<section id="lib" class="screen" hidden>
+  <div class="top">
+    <button class="chip" id="libBack">返回</button>
+    <h1>片库</h1>
+    <span class="del" id="libSize"></span>
+  </div>
+  <div class="takes" id="takes"></div>
+</section>
+
 <!-- 回看 -->
 <section id="review" hidden>
   <video id="playback" playsinline controls></video>
+  <div class="stats" id="stats"></div>
   <div class="grid3">
     <button class="btn" id="retakeBtn">重拍</button>
     <button class="btn primary" id="saveBtn">存到相册</button>
@@ -170,7 +200,7 @@ function toast(msg){ const t=$('toast'); t.textContent=msg; t.hidden=false; clea
 const SAMPLE = {id:'s'+Date.now(), title:'示例：开场白', text:
 `大家好，这是一段示例稿子，你可以直接删掉换成自己的口播稿。
 
-拍摄时，文字会从屏幕上方往上滚，尽量把眼睛停在黄色小箭头那一行，这样看起来就像在看镜头。
+拍摄时，文字会从屏幕上方往上滚，尽量把眼睛停在【黄色小箭头】那一行，这样看起来就像在看镜头。
 
 语速单位是「字每分钟」，正常口播大概在两百到两百六之间。点一下文字可以暂停，手指上下拖能往回找。
 
@@ -190,7 +220,7 @@ function renderList(){
     box.appendChild(b);
   });
 }
-function countChars(t){ return t.replace(/\s/g,'').length }
+function countChars(t){ return (t.match(/[\p{L}\p{N}]/gu)||[]).length }
 function updateStat(){
   const n=countChars($('text').value), cpm=settings.speed;
   const sec=Math.round(n/cpm*60);
@@ -207,7 +237,7 @@ $('delBtn').onclick=()=>{
 };
 
 /* ---------- 设置 ---------- */
-const DEF={speed:220,size:34,area:42,shade:55,mirror:false,countdown:true,auto:true,follow:true,sr:true,match:true,hq:false,facing:'user',v:2};
+const DEF={speed:220,size:34,area:42,shade:55,mirror:false,countdown:true,auto:true,follow:true,sr:true,match:true,hq:false,brk:false,facing:'user',v:2};
 let saved=store.get('settings',{});
 if(saved.v!==2) saved={...saved,follow:true,sr:true,match:true,v:2};   // 旧版本设置迁移：默认开跟读、成片同预览
 const settings=Object.assign({},DEF,saved);
@@ -224,6 +254,7 @@ function applySettings(){
   $('tSR').classList.toggle('on',settings.sr); $('tSR').hidden=!settings.follow||!SR;
   $('tMatch').classList.toggle('on',settings.match);
   $('tHQ').classList.toggle('on',settings.hq);
+  $('tBreak').classList.toggle('on',settings.brk);
   $('modeBtn').innerHTML=settings.follow?'<b>跟读模式</b>：你说话才滚 · 点此切换':'<b>匀速模式</b>：按语速一直滚 · 点此切换';
   const p=$('prompter');
   p.style.height=settings.area+'%';
@@ -246,6 +277,11 @@ $('modeBtn').onclick=()=>{
   if(settings.follow){ ensureListening() } else { stopListen() }
   toast(settings.follow?'跟读：你开口就滚，停下就停':'匀速：按设定语速一直滚');
 };
+$('tBreak').onclick=()=>{
+  settings.brk=!settings.brk; applySettings();
+  if(!$('shoot').hidden){ const keep=idxAtReadline(); renderRoll(curScript().text); layoutRoll(); const sp=spans[Math.min(keep,spans.length-1)]; if(sp) setPos(sp.offsetTop-readY) }
+};
+$('homeBtn').onclick=()=>{ if(recorder) return toast('录制中不能跳回开头'); setPlaying(false); resetFollow() };
 $('setBtn').onclick=()=>{ $('settings').hidden=!$('settings').hidden };
 
 /* ---------- 滚动引擎 ---------- */
@@ -298,11 +334,14 @@ const norm=c=>{ c=c.toLowerCase(); return NORM[c]||c };
 function renderRoll(text){
   const r=$('roll'), frag=document.createDocumentFragment();
   chars=[]; spans=[]; cursor=-1; marked=-1; srTarget=-1;
-  let buf='';
+  if(settings.brk) text=text.replace(/([。！？!?；;…]+[”’」』）)]?)(?!\n)/g,'$1\n');
+  let buf='', em=false;
   for(const c of text){
+    if(c==='【'){ em=true; continue }
+    if(c==='】'){ em=false; continue }
     if(isWord(c)){
       if(buf){ frag.appendChild(document.createTextNode(buf)); buf='' }
-      const s=document.createElement('span'); s.textContent=c; frag.appendChild(s);
+      const s=document.createElement('span'); s.textContent=c; if(em) s.className='em'; frag.appendChild(s);
       spans.push(s); chars.push(norm(c));
     }else buf+=c;
   }
@@ -483,7 +522,7 @@ $('recBtn').onclick=async()=>{
   const mime=pickMime(); if(mime===null) return toast('这个浏览器不支持录像');
   if(settings.follow && settings.auto) ensureListening();     // 趁这次点按把麦克风和识别启动
   $('recBtn').disabled=true; $('settings').hidden=true;
-  setPlaying(false); resetFollow();
+  setPlaying(false); srTarget=-1; cursor=idxAtReadline()-1; markTo(cursor); recFrom={pos, idx:cursor+1};
   await countdown();
   chunks=[];
   recPipe=recordStream();
@@ -491,13 +530,18 @@ $('recBtn').onclick=async()=>{
   try{ recorder=new MediaRecorder(recPipe.s, mime?{mimeType:mime,videoBitsPerSecond:bps,audioBitsPerSecond:128000}:{videoBitsPerSecond:bps}) }
   catch(e){ recorder=new MediaRecorder(recPipe.s) }
   lastExt=(recorder.mimeType||mime).includes('webm')?'webm':'mp4';
-  recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data) };
+  recorder.ondataavailable=e=>{ if(e.data.size){ chunks.push(e.data); persistChunk(e.data) } };
   recorder.onstop=()=>{
     lastBlob=new Blob(chunks,{type:recorder.mimeType||('video/'+lastExt)});
+    const dur=(Date.now()-recStart)/1000;
+    const endIdx=settings.follow?Math.max(cursor,idxAtReadline()-1):idxAtReadline()-1;
+    const read=Math.max(0,endIdx+1-recFrom.idx);
+    finishTake(lastBlob,{dur, chars:read, cpm: dur>5&&read>10 ? Math.round(read/dur*60) : 0});
     recPipe?.stop(); recPipe=null;
     recorder=null; $('recBtn').classList.remove('on'); $('hud').hidden=true; clearInterval(clockT);
-    setPlaying(false); $('backBtn').disabled=false; showReview();
+    setPlaying(false); $('backBtn').disabled=false; openReview({...take, blob:lastBlob},'shoot');
   };
+  beginTake();
   recorder.start(1000);
   recStart=Date.now(); $('recBtn').classList.add('on'); $('recBtn').disabled=false; $('backBtn').disabled=true;
   $('hud').hidden=false; $('clock').textContent='00:00';
@@ -505,14 +549,26 @@ $('recBtn').onclick=async()=>{
   if(settings.auto) setPlaying(true);
 };
 
-function fileName(){ const d=new Date(), p=n=>String(n).padStart(2,'0'); return `提词_${(curScript().title||'视频').slice(0,12)}_${d.getMonth()+1}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.${lastExt}` }
-function showReview(){
+function fileName(){ const t=reviewTake||{}, d=new Date(t.at||Date.now()), p=n=>String(n).padStart(2,'0'); return `提词_${(t.title||'视频').slice(0,12)}_${d.getMonth()+1}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.${lastExt}` }
+const fmtDur=s=>{ s=Math.round(s); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0') };
+const fmtDate=ms=>{ const d=new Date(ms), p=n=>String(n).padStart(2,'0'); return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}` };
+let reviewTake=null, reviewFrom='shoot', recFrom={pos:0,idx:0};
+function openReview(t,from){
+  reviewTake=t; reviewFrom=from; lastBlob=t.blob; lastExt=t.ext||lastExt;
   const v=$('playback'); if(v.src) URL.revokeObjectURL(v.src);
   v.src=URL.createObjectURL(lastBlob); $('review').hidden=false;
+  $('retakeBtn').textContent=from==='lib'?'关闭':'重拍这段';
+  let st=`时长 <b>${fmtDur(t.dur||0)}</b>`;
+  if(t.cpm){ const tag=t.cpm>280?'偏快':t.cpm<180?'偏慢':'刚好'; st+=` · 念了 <b>${t.chars}</b> 字 · 实际 <b>${t.cpm}</b> 字/分（${tag}）` }
+  $('stats').innerHTML=st;
   const mb=(lastBlob.size/1048576).toFixed(1);
-  $('reviewTip').textContent=`${mb} MB · 「存到相册」会弹出系统分享面板，选「存储视频」即可；不行就用「下载文件」。`;
+  $('reviewTip').textContent=`${mb} MB · 已自动存进片库 · 「存到相册」会弹出系统分享面板，选「存储视频」即可。`;
 }
-$('retakeBtn').onclick=()=>{ $('playback').pause(); $('review').hidden=true; resetFollow() };
+$('retakeBtn').onclick=()=>{
+  $('playback').pause(); $('review').hidden=true;
+  if(reviewFrom==='shoot'){ srTarget=-1; setPos(recFrom.pos); cursor=recFrom.idx-1; markTo(cursor) }
+  else renderLib();
+};
 $('saveBtn').onclick=async()=>{
   const f=new File([lastBlob],fileName(),{type:lastBlob.type});
   if(navigator.canShare?.({files:[f]})){
@@ -543,7 +599,112 @@ $('readBtn').onclick=()=>enterShoot(false);
 $('backBtn').onclick=()=>{ if(recorder) return; setPlaying(false); stopListen(); stopCam(); try{wake?.release()}catch(e){}; $('shoot').hidden=true; $('edit').hidden=false };
 addEventListener('resize',()=>requestAnimationFrame(layoutRoll));
 
-loadEditor(); applySettings();
+/* ---------- 片库：录的每一秒都写进手机本地数据库，意外退出也能找回 ---------- */
+const DB=(()=>{
+  let p=null;
+  const open=()=>p||(p=new Promise((res,rej)=>{
+    const r=indexedDB.open('teleprompter',1);
+    r.onupgradeneeded=()=>{ const d=r.result; d.createObjectStore('takes',{keyPath:'id'}); d.createObjectStore('chunks',{keyPath:['take','seq']}) };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  }));
+  const tx=(st,mode,fn)=>open().then(d=>new Promise((res,rej)=>{
+    const t=d.transaction(st,mode), q=fn(t.objectStore(st));
+    t.oncomplete=()=>res(q&&q.result); t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error);
+  }));
+  const range=id=>IDBKeyRange.bound([id,0],[id,Number.MAX_SAFE_INTEGER]);
+  return {
+    put:(st,v)=>tx(st,'readwrite',s=>s.put(v)),
+    all:st=>tx(st,'readonly',s=>s.getAll()),
+    del:(st,k)=>tx(st,'readwrite',s=>s.delete(k)),
+    chunksOf:id=>tx('chunks','readonly',s=>s.getAll(range(id))),
+    delChunks:id=>tx('chunks','readwrite',s=>s.delete(range(id))),
+  };
+})();
+let take=null, seq=0;
+function beginTake(){
+  take={id:'t'+Date.now(), title:curScript().title||'未命名', at:Date.now(), type:recorder.mimeType||'', ext:lastExt, done:false};
+  seq=0; const t=take;
+  DB.put('takes',{...t}).catch(()=>{ t.nopersist=true });
+}
+function persistChunk(d){ const t=take; if(t && !t.nopersist) DB.put('chunks',{take:t.id,seq:seq++,data:d}).catch(()=>{}) }
+async function finishTake(blob,meta){
+  const t=take; Object.assign(t,meta,{done:true,size:blob.size});
+  const row={...t,blob}; delete row.nopersist;
+  try{ await DB.put('takes',row); await DB.delChunks(t.id) }
+  catch(e){ toast('没能存进片库，记得点「存到相册」') }
+  refreshLibCount();
+}
+async function recover(){
+  try{
+    let n=0;
+    for(const t of await DB.all('takes')){
+      if(t.done) continue;
+      const cs=await DB.chunksOf(t.id);
+      if(!cs.length){ await DB.del('takes',t.id); continue }
+      cs.sort((a,b)=>a.seq-b.seq);
+      const blob=new Blob(cs.map(c=>c.data),{type:t.type||('video/'+t.ext)});
+      await DB.put('takes',{...t,done:true,recovered:true,blob,size:blob.size,dur:cs.length});
+      await DB.delChunks(t.id); n++;
+    }
+    if(n) toast(`找回了 ${n} 条意外中断的录制，在片库里`);
+  }catch(e){}
+  refreshLibCount();
+}
+async function refreshLibCount(){
+  let n=0; try{ n=(await DB.all('takes')).filter(t=>t.done).length }catch(e){}
+  $('libBtn').textContent=n?`片库 ${n}`:'片库';
+}
+function mkBtn(label,fn,cls){ const b=document.createElement('button'); b.textContent=label; if(cls) b.className=cls; b.onclick=fn; return b }
+async function renderLib(){
+  let all=[]; try{ all=(await DB.all('takes')).filter(t=>t.done).sort((a,b)=>b.at-a.at) }catch(e){}
+  const box=$('takes'); box.textContent='';
+  if(!all.length){
+    const e=document.createElement('div'); e.className='empty';
+    e.textContent='还没有录过视频。每条录完都会自动存在这里，切走页面、退出浏览器也不会丢。存到相册后，可以在这里删掉省空间。';
+    box.appendChild(e);
+  }
+  let total=0;
+  for(const t of all){
+    total+=t.size||0;
+    const row=document.createElement('div'); row.className='take';
+    const ti=document.createElement('div'); ti.className='t'; ti.textContent=t.title+(t.recovered?'（找回）':'');
+    const m=document.createElement('div'); m.className='m';
+    m.textContent=[fmtDate(t.at), t.dur?fmtDur(t.dur):'', ((t.size||0)/1048576).toFixed(1)+' MB', t.cpm?t.cpm+' 字/分':''].filter(Boolean).join(' · ');
+    const b=document.createElement('div'); b.className='b';
+    const del=mkBtn('删',async()=>{
+      if(del.dataset.arm!=='1'){ del.dataset.arm='1'; del.textContent='确认删'; setTimeout(()=>{ del.dataset.arm=''; del.textContent='删' },2500); return }
+      try{ await DB.del('takes',t.id) }catch(e){}
+      renderLib(); refreshLibCount();
+    },'warn');
+    b.append(mkBtn('看',()=>openReview(t,'lib')), del);
+    row.append(ti,b,m); box.appendChild(row);
+  }
+  $('libSize').textContent=all.length?`${all.length} 条 · ${(total/1048576).toFixed(0)} MB`:'';
+}
+$('libBtn').onclick=()=>{ $('edit').hidden=true; $('lib').hidden=false; renderLib() };
+$('libBack').onclick=()=>{ $('lib').hidden=true; $('edit').hidden=false };
+
+/* ---------- 导入 txt 稿子 ---------- */
+$('importBtn').onclick=()=>$('importFile').click();
+$('importFile').onchange=async e=>{
+  const files=[...e.target.files]; let n=0;
+  for(const f of files){
+    try{
+      const text=(await f.text()).replace(/\r\n?/g,'\n').trim();
+      if(!text) continue;
+      const s={id:'s'+Date.now()+'_'+n, title:f.name.replace(/\.[^.]+$/,'').slice(0,40), text};
+      scripts.unshift(s); cur=s.id; n++;
+    }catch(err){}
+  }
+  e.target.value='';
+  if(n){ save(); loadEditor(); toast(`导入了 ${n} 篇`) } else toast('没有读到文字');
+};
+$('hintBtn').onclick=()=>toast('把要强调的词用【】括起来，拍摄时显示成黄色');
+
+/* ---------- 离线也能打开 ---------- */
+if('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+loadEditor(); applySettings(); recover();
 </script>
 </body>
 </html>
